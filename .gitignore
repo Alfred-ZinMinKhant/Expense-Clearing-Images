@@ -1,3 +1,8 @@
+# Ignore generated PDFs
+*.pdf
+
+# Ignore all files in images folder
+images/*
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
