@@ -14,6 +14,8 @@ IMAGES_DIR = "images"
 today_str = datetime.datetime.now().strftime("%Y-%m-%d")
 OUTPUT_PDF = f"receipts_{today_str}.pdf"
 A4_WIDTH, A4_HEIGHT = A4  # in points (1 point = 1/72 inch)
+# Choose a DPI for rasterizing images for the PDF. Higher DPI -> sharper but larger PDF.
+DPI = 300
 
 
 def get_images_list(directory):
@@ -98,13 +100,19 @@ def main():
         return img.width > img.height
 
     def resize_for_cell(img, span_cols=1, span_rows=1):
-        w = cell_width * span_cols + spacing * (span_cols - 1)
-        h = (
+        # `w` and `h` are in PDF points. Convert target cell size to pixels using DPI,
+        # resize the image in pixels to that target for crispness, then return the
+        # resized PIL image (pixel dimensions).
+        w_pts = cell_width * span_cols + spacing * (span_cols - 1)
+        h_pts = (
             cell_height * span_rows + spacing * (span_rows - 1) - 80
-        )  # leave space for caption
+        )  # leave space for caption (points)
+        # Convert points -> pixels for the target size
+        target_w_px = max(1, int(w_pts * DPI / 72.0))
+        target_h_px = max(1, int(h_pts * DPI / 72.0))
         img_w, img_h = img.size
-        scale = min(w / img_w, h / img_h)
-        new_size = (int(img_w * scale), int(img_h * scale))
+        scale = min(target_w_px / img_w, target_h_px / img_h)
+        new_size = (max(1, int(img_w * scale)), max(1, int(img_h * scale)))
         return img.resize(new_size, Image.LANCZOS)
 
     i = 0
@@ -151,6 +159,7 @@ def main():
             temp_path = f"_temp_img_{k}.jpg"
             img_resized = img_resized.convert("RGB")
             img_resized.save(temp_path, "JPEG")
+            # Coordinates x,y are in points. Compute top-left of the cell in points.
             x = margin + col * (cell_width + spacing)
             y = (
                 A4_HEIGHT
@@ -159,23 +168,25 @@ def main():
                 - row * spacing
                 - (rowspan - 1) * spacing
             )
-            # Center image in its cell(s)
+            # Center image in its cell(s). Convert image pixel dims -> points for placement.
+            img_w_px, img_h_px = img_resized.size
+            img_w_pts = img_w_px * 72.0 / DPI
+            img_h_pts = img_h_px * 72.0 / DPI
             cell_w = cell_width * colspan + spacing * (colspan - 1)
             cell_h = cell_height * rowspan + spacing * (rowspan - 1)
-            x += (cell_w - img_resized.width) / 2
+            x += (cell_w - img_w_pts) / 2
             y += (
-                cell_h - img_resized.height
+                cell_h - img_h_pts
             ) / 2 + 80  # move image up to leave space for caption
-            c.drawImage(
-                temp_path, x, y, width=img_resized.width, height=img_resized.height
-            )
-            # Draw caption below image using reportlab (guaranteed large)
+            # Draw image using point dimensions (reportlab works in points)
+            c.drawImage(temp_path, x, y, width=img_w_pts, height=img_h_pts)
+            # Draw caption below image using reportlab
             caption = captions[img_idx]
             font_size = 24
             c.setFont("Helvetica-Bold", font_size)
             caption_width = c.stringWidth(caption, "Helvetica-Bold", font_size)
-            caption_x = x + (img_resized.width - caption_width) / 2
-            caption_y = y - 40  # more space between image and caption
+            caption_x = x + (img_w_pts - caption_width) / 2
+            caption_y = y - 20  # space between image and caption (points)
             c.setFillColorRGB(0, 0, 0)
             c.drawString(caption_x, caption_y, caption)
             os.remove(temp_path)
