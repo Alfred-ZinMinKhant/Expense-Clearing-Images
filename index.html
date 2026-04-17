@@ -41,7 +41,7 @@
                         </svg>
                         <h2 class="upload-title">Drop receipt images here</h2>
                         <p class="upload-text">or click to browse</p>
-                        <p class="upload-hint">Supports JPG, PNG, GIF, BMP • Multiple files allowed</p>
+                        <p class="upload-hint">Supports JPG, PNG, GIF, BMP • Multiple files allowed • Paste with Ctrl+V</p>
                     </div>
                 </div>
             </section>
@@ -53,6 +53,23 @@
                         <span id="imageCount">0</span> Images Ready
                     </h2>
                     <div class="preview-actions">
+                        <button class="btn btn-secondary" id="addMoreBtn" title="Add more images">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <line x1="12" y1="5" x2="12" y2="19"></line>
+                                <line x1="5" y1="12" x2="19" y2="12"></line>
+                            </svg>
+                            Add More
+                        </button>
+                        <button class="btn btn-secondary" id="sortToggleBtn" data-mode="auto" title="Auto-sorting by receipt number — click to switch to manual order">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <line x1="8" y1="6" x2="21" y2="6"></line>
+                                <line x1="8" y1="12" x2="21" y2="12"></line>
+                                <line x1="8" y1="18" x2="21" y2="18"></line>
+                                <polyline points="3 6 4 7 6 5"></polyline>
+                                <polyline points="3 12 4 13 6 11"></polyline>
+                            </svg>
+                            Auto Sort
+                        </button>
                         <button class="btn btn-secondary" id="clearBtn">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <polyline points="3 6 5 6 21 6"></polyline>
@@ -84,13 +101,13 @@
             <div class="loading-overlay" id="loadingOverlay" style="display: none;">
                 <div class="loading-content">
                     <div class="spinner"></div>
-                    <p class="loading-text">Generating your PDF...</p>
+                    <p class="loading-text" id="loadingText">Preparing…</p>
                 </div>
             </div>
         </main>
 
         <footer class="footer">
-            <p>Built with ❤️ for easy expense management</p>
+            <p>Built by ALFRED with ❤️ for easy expense management</p>
         </footer>
     </div>
 

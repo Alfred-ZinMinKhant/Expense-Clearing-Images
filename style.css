@@ -361,6 +361,13 @@ body::before {
     transform: scale(1.02);
 }
 
+/* Subtle pulse during the 200ms hold before touch drag activates */
+.preview-item.touch-drag-pending {
+    transform: scale(1.02);
+    box-shadow: var(--shadow-md);
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
 /* Delete button */
 .delete-btn {
     position: absolute;
@@ -390,6 +397,12 @@ body::before {
     .delete-btn {
         opacity: 1;
     }
+}
+
+/* Sort toggle — amber tint when manual order is active */
+#sortToggleBtn[data-mode="manual"] {
+    border-color: #f59e0b;
+    color: #f59e0b;
 }
 
 .delete-btn:hover {
@@ -497,6 +510,14 @@ body::before {
     border-color: white;
     box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.2);
     cursor: text;
+}
+
+/* Inline validation — shown while field is empty.
+   Double-class selector gives higher specificity than :focus so no !important needed. */
+.receipt-input.receipt-input--error,
+.receipt-input.receipt-input--error:focus {
+    border-color: #ef4444;
+    box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.3);
 }
 
 .edit-hint {

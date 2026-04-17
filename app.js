@@ -3,16 +3,26 @@
 const MAX_IMAGES = 50;
 const COMPRESS_MAX_DIM = 2000;
 const COMPRESS_QUALITY = 0.82;
+const DRAG_DELAY_MS = 200;
+const DRAG_CANCEL_PX = 10;
 
 let uploadedImages = [];
-let dragSrcIndex = null;
 let pendingFiles = 0;
+let insertionCounter = 0;
+let isAutoSort = true;
+
+// Mouse drag state
+let dragSrcIndex = null;
 
 // Touch drag state
 let touchDragSrcIndex = null;
+let touchDragActivated = false;
+let touchDragTimer = null;
 let touchClone = null;
 let touchOffsetX = 0;
 let touchOffsetY = 0;
+let touchStartX = 0;
+let touchStartY = 0;
 
 // DOM Elements
 const uploadZone = document.getElementById('uploadZone');
@@ -22,11 +32,14 @@ const previewGrid = document.getElementById('previewGrid');
 const imageCount = document.getElementById('imageCount');
 const generateBtn = document.getElementById('generateBtn');
 const clearBtn = document.getElementById('clearBtn');
+const addMoreBtn = document.getElementById('addMoreBtn');
+const sortToggleBtn = document.getElementById('sortToggleBtn');
 const loadingOverlay = document.getElementById('loadingOverlay');
+const loadingText = document.getElementById('loadingText');
 const filenameInput = document.getElementById('filenameInput');
 const toast = document.getElementById('toast');
 
-// Initialize Event Listeners
+// Initialize
 function init() {
     uploadZone.addEventListener('click', () => fileInput.click());
     fileInput.addEventListener('change', handleFileSelect);
@@ -35,13 +48,20 @@ function init() {
     uploadZone.addEventListener('dragleave', handleDragLeave);
     uploadZone.addEventListener('drop', handleDrop);
 
+    document.addEventListener('paste', handlePaste);
+
     generateBtn.addEventListener('click', generatePDF);
     clearBtn.addEventListener('click', clearAll);
+    addMoreBtn.addEventListener('click', () => fileInput.click());
+    sortToggleBtn.addEventListener('click', handleSortToggle);
 }
 
-// File Selection Handler — filter to images only (mirrors drop handler)
+// ── File Input ────────────────────────────────────────────────────────────────
+
 function handleFileSelect(e) {
     const files = Array.from(e.target.files).filter(f => f.type.startsWith('image/'));
+    // Reset so the same file can be re-selected after clear
+    e.target.value = '';
     processFiles(files);
 }
 
@@ -61,6 +81,57 @@ function handleDrop(e) {
     const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'));
     processFiles(files);
 }
+
+// Paste images directly from clipboard (Ctrl+V / mobile share)
+function handlePaste(e) {
+    const files = Array.from(e.clipboardData.items)
+        .filter(item => item.kind === 'file' && item.type.startsWith('image/'))
+        .map(item => item.getAsFile())
+        .filter(Boolean);
+    if (files.length > 0) processFiles(files);
+}
+
+// ── Sort Mode ─────────────────────────────────────────────────────────────────
+
+function handleSortToggle() {
+    isAutoSort = !isAutoSort;
+    updateSortToggleLabel();
+    if (isAutoSort) {
+        sortImages();
+        updatePreview();
+    }
+}
+
+function updateSortToggleLabel() {
+    if (isAutoSort) {
+        sortToggleBtn.textContent = 'Auto Sort';
+        sortToggleBtn.dataset.mode = 'auto';
+        sortToggleBtn.title = 'Auto-sorting by receipt number — click to switch to manual order';
+    } else {
+        sortToggleBtn.textContent = 'Manual Order';
+        sortToggleBtn.dataset.mode = 'manual';
+        sortToggleBtn.title = 'Manual order active — click to auto-sort by receipt number';
+    }
+}
+
+function activateManualOrder() {
+    if (isAutoSort) {
+        isAutoSort = false;
+        updateSortToggleLabel();
+    }
+}
+
+// Stable sort: numeric receipt number, ties broken by insertion order
+function sortImages() {
+    uploadedImages.sort((a, b) => {
+        const numA = parseInt(a.receiptNo, 10) || 999999;
+        const numB = parseInt(b.receiptNo, 10) || 999999;
+        if (numA !== numB) return numA - numB;
+        return a.insertionOrder - b.insertionOrder;
+    });
+}
+
+// ── Image Helpers ─────────────────────────────────────────────────────────────
 
 // Compress image via canvas — returns Promise<{dataUrl, width, height}>
 function compressImage(originalDataUrl) {
@@ -83,7 +154,20 @@ function compressImage(originalDataUrl) {
     });
 }
 
-// Process Files
+// Sanitize PDF filename — strip characters illegal on common filesystems
+function sanitizeFilename(name) {
+    return name.replace(/[/\\:*?"<>|]/g, '_').replace(/\s+/g, ' ').trim();
+}
+
+// Escape HTML to prevent XSS when injecting user strings into innerHTML
+function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+}
+
+// ── Process Files ─────────────────────────────────────────────────────────────
+
 function processFiles(files) {
     if (files.length === 0) return;
 
@@ -106,7 +190,7 @@ function processFiles(files) {
         }
     }
 
-    // Snapshot the current length so async callbacks use a stable fallback base
+    // Snapshot current length so async callbacks have a stable fallback base
     const startIndex = uploadedImages.length;
     pendingFiles += files.length;
     updateUploadingIndicator();
@@ -125,12 +209,9 @@ function processFiles(files) {
                     height,
                     isLandscape: width > height,
                     format: 'JPEG',
+                    insertionOrder: insertionCounter++,
                 });
-                uploadedImages.sort((a, b) => {
-                    const numA = parseInt(a.receiptNo, 10) || 999999;
-                    const numB = parseInt(b.receiptNo, 10) || 999999;
-                    return numA - numB;
-                });
+                if (isAutoSort) sortImages();
             } finally {
                 pendingFiles--;
                 updateUploadingIndicator();
@@ -148,18 +229,18 @@ function updateUploadingIndicator() {
         : 'Drop receipt images here';
 }
 
-// Extract Receipt Number from Filename
-// Only matches explicit receipt patterns (e.g. "Receipt No 12", "receipt_no_12").
-// Generic filenames like "Screenshot_20260417_..." fall through to the fallback index
-// so each image gets a unique sequential number instead of a shared date fragment.
+// Extract Receipt Number — only matches explicit "Receipt No X" patterns.
+// Generic filenames (screenshots, etc.) fall through to the sequential fallback
+// so each image gets a unique number instead of a shared date fragment.
 function extractReceiptNumber(filename, fallback) {
     const match = filename.match(/receipt[\s_-]*no[\s_-]*(\d+)/i);
     if (match) return match[1];
     return String(fallback);
 }
 
-// Shared slot-packing logic — single source of truth used by both
-// calculateTotalPages (via pages.length) and generatePDF
+// ── Slot Packing ──────────────────────────────────────────────────────────────
+
+// Single source of truth for 2×2 grid layout used by both page count and PDF drawing.
 // Returns: array of pages, each page = array of { img, row, col, colspan, rowspan }
 function packIntoPages(images) {
     const pages = [];
@@ -201,7 +282,8 @@ function packIntoPages(images) {
     return pages;
 }
 
-// Update Preview — builds DOM in a fragment before touching the live DOM
+// ── Preview ───────────────────────────────────────────────────────────────────
+
 function updatePreview() {
     if (uploadedImages.length === 0) {
         previewSection.style.display = 'none';
@@ -217,6 +299,8 @@ function updatePreview() {
         item.className = 'preview-item';
         item.draggable = true;
         item.dataset.index = index;
+
+        // escapeHtml used on all user-controlled strings to prevent XSS
         item.innerHTML = `
             <button class="delete-btn" data-index="${index}" title="Remove image">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
@@ -224,16 +308,17 @@ function updatePreview() {
                     <line x1="6" y1="6" x2="18" y2="18"></line>
                 </svg>
             </button>
-            <img src="${img.dataUrl}" alt="${img.name}" class="preview-image">
+            <img src="${escapeHtml(img.dataUrl)}" alt="" class="preview-image">
             <div class="preview-info">
-                <span class="preview-name" title="${img.name}">${img.name}</span>
+                <span class="preview-name" title="${escapeHtml(img.name)}">${escapeHtml(img.name)}</span>
                 <label class="receipt-label">
                     <div class="receipt-badge-row">
                         <svg class="edit-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
                             <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
                         </svg>
-                        <input class="preview-badge receipt-input" type="text" value="${img.receiptNo}" data-index="${index}">
+                        <input class="preview-badge receipt-input" type="text"
+                               value="${escapeHtml(img.receiptNo)}" data-index="${index}">
                     </div>
                     <span class="edit-hint">tap to edit</span>
                 </label>
@@ -257,42 +342,52 @@ function updatePreview() {
     // Receipt number inputs
     previewGrid.querySelectorAll('.receipt-input').forEach(input => {
         input.addEventListener('mousedown', e => e.stopPropagation());
-        input.addEventListener('touchstart', e => e.stopPropagation());
+        input.addEventListener('touchstart', e => e.stopPropagation(), { passive: true });
+
+        // Live validation: red border while field is empty
+        input.addEventListener('input', (e) => {
+            e.target.classList.toggle('receipt-input--error', e.target.value.trim() === '');
+        });
+
         input.addEventListener('change', (e) => {
             const idx = parseInt(e.target.dataset.index, 10);
             const newVal = e.target.value.trim();
             uploadedImages[idx].receiptNo = newVal || String(idx + 1);
-            uploadedImages.sort((a, b) => {
-                const numA = parseInt(a.receiptNo, 10) || 999999;
-                const numB = parseInt(b.receiptNo, 10) || 999999;
-                return numA - numB;
-            });
-            updatePreview();
+            e.target.value = uploadedImages[idx].receiptNo;
+            e.target.classList.remove('receipt-input--error');
+            if (isAutoSort) {
+                sortImages();
+                updatePreview();
+            }
         });
     });
 
-    // Drag-to-reorder (mouse)
+    // Drag-to-reorder (mouse + touch)
     previewGrid.querySelectorAll('.preview-item').forEach(item => {
         item.addEventListener('dragstart', handleCardDragStart);
         item.addEventListener('dragover', handleCardDragOver);
         item.addEventListener('dragleave', handleCardDragLeave);
         item.addEventListener('drop', handleCardDrop);
         item.addEventListener('dragend', handleCardDragEnd);
-        // Drag-to-reorder (touch)
         item.addEventListener('touchstart', handleTouchStart, { passive: true });
         item.addEventListener('touchmove', handleTouchMove, { passive: false });
         item.addEventListener('touchend', handleTouchEnd);
     });
 }
 
-// Clear All
+// ── Clear ─────────────────────────────────────────────────────────────────────
+
 function clearAll() {
     uploadedImages = [];
+    insertionCounter = 0;
+    isAutoSort = true;
+    updateSortToggleLabel();
     updatePreview();
     fileInput.value = '';
 }
 
-// Toast
+// ── Toast ─────────────────────────────────────────────────────────────────────
+
 let toastTimer;
 function showToast(message, type = 'success') {
     toast.textContent = message;
@@ -301,12 +396,13 @@ function showToast(message, type = 'success') {
     toastTimer = setTimeout(() => toast.classList.remove('toast-show'), 3000);
 }
 
-// ── Mouse drag-to-reorder ────────────────────────────────────────────────────
+// ── Mouse Drag-to-Reorder ─────────────────────────────────────────────────────
 
 function handleCardDragStart(e) {
     dragSrcIndex = parseInt(this.dataset.index, 10);
     this.classList.add('dragging');
     e.dataTransfer.effectAllowed = 'move';
+    activateManualOrder();
 }
 
 function handleCardDragOver(e) {
@@ -339,41 +435,72 @@ function handleCardDragEnd() {
     dragSrcIndex = null;
 }
 
-// ── Touch drag-to-reorder ────────────────────────────────────────────────────
+// ── Touch Drag-to-Reorder ─────────────────────────────────────────────────────
+// Uses a 200ms hold delay so normal scrolling isn't blocked.
+// If the finger moves more than DRAG_CANCEL_PX before the timer fires,
+// the drag is cancelled and the browser handles the scroll.
 
 function handleTouchStart(e) {
     const touch = e.touches[0];
-    touchDragSrcIndex = parseInt(this.dataset.index);
+    touchStartX = touch.clientX;
+    touchStartY = touch.clientY;
+    touchDragSrcIndex = parseInt(this.dataset.index, 10);
+    touchDragActivated = false;
 
-    const rect = this.getBoundingClientRect();
-    touchOffsetX = touch.clientX - rect.left;
-    touchOffsetY = touch.clientY - rect.top;
+    this.classList.add('touch-drag-pending');
 
-    touchClone = this.cloneNode(true);
-    Object.assign(touchClone.style, {
-        position: 'fixed',
-        left: `${rect.left}px`,
-        top: `${rect.top}px`,
-        width: `${rect.width}px`,
-        opacity: '0.85',
-        pointerEvents: 'none',
-        zIndex: '9999',
-        transform: 'scale(1.05)',
-        transition: 'none',
-        boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
-    });
-    document.body.appendChild(touchClone);
-    this.classList.add('dragging');
+    // Arrow function captures `this` from the enclosing event handler scope
+    touchDragTimer = setTimeout(() => {
+        touchDragActivated = true;
+        this.classList.remove('touch-drag-pending');
+        activateManualOrder();
+
+        const rect = this.getBoundingClientRect();
+        touchOffsetX = touchStartX - rect.left;
+        touchOffsetY = touchStartY - rect.top;
+
+        touchClone = this.cloneNode(true);
+        Object.assign(touchClone.style, {
+            position: 'fixed',
+            left: `${rect.left}px`,
+            top: `${rect.top}px`,
+            width: `${rect.width}px`,
+            opacity: '0.85',
+            pointerEvents: 'none',
+            zIndex: '9999',
+            transform: 'scale(1.05)',
+            transition: 'none',
+            boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
+        });
+        document.body.appendChild(touchClone);
+        this.classList.add('dragging');
+    }, DRAG_DELAY_MS);
 }
 
 function handleTouchMove(e) {
+    const touch = e.touches[0];
+
+    if (!touchDragActivated) {
+        // Cancel drag intent if the finger moved far enough to be a scroll gesture
+        const dx = touch.clientX - touchStartX;
+        const dy = touch.clientY - touchStartY;
+        if (Math.hypot(dx, dy) > DRAG_CANCEL_PX) {
+            clearTimeout(touchDragTimer);
+            touchDragTimer = null;
+            touchDragSrcIndex = null;
+            const pending = previewGrid.querySelector('.touch-drag-pending');
+            if (pending) pending.classList.remove('touch-drag-pending');
+        }
+        return;
+    }
+
     e.preventDefault();
     if (!touchClone) return;
-    const touch = e.touches[0];
+
     touchClone.style.left = `${touch.clientX - touchOffsetX}px`;
     touchClone.style.top = `${touch.clientY - touchOffsetY}px`;
 
-    // Find card under finger (hide clone temporarily so elementFromPoint works)
+    // Hide clone briefly so elementFromPoint can see what's underneath
     touchClone.style.display = 'none';
     const el = document.elementFromPoint(touch.clientX, touch.clientY);
     touchClone.style.display = '';
@@ -388,8 +515,23 @@ function handleTouchMove(e) {
 }
 
 function handleTouchEnd(e) {
+    clearTimeout(touchDragTimer);
+    touchDragTimer = null;
+
+    const pending = previewGrid.querySelector('.touch-drag-pending');
+    if (pending) pending.classList.remove('touch-drag-pending');
+
+    if (!touchDragActivated) {
+        touchDragSrcIndex = null;
+        return;
+    }
+
+    touchDragActivated = false;
+
     if (touchClone) { touchClone.remove(); touchClone = null; }
-    this.classList.remove('dragging');
+
+    const srcEl = previewGrid.querySelector(`[data-index="${touchDragSrcIndex}"]`);
+    if (srcEl) srcEl.classList.remove('dragging');
     for (const i of previewGrid.querySelectorAll('.preview-item')) {
         i.classList.remove('drag-target');
     }
@@ -408,7 +550,7 @@ function handleTouchEnd(e) {
     touchDragSrcIndex = null;
 }
 
-// ── Generate PDF ─────────────────────────────────────────────────────────────
+// ── Generate PDF ──────────────────────────────────────────────────────────────
 
 async function generatePDF() {
     if (uploadedImages.length === 0) {
@@ -425,6 +567,7 @@ async function generatePDF() {
     }
 
     loadingOverlay.style.display = 'flex';
+    loadingText.textContent = 'Preparing…';
 
     try {
         const { jsPDF } = window.jspdf;
@@ -441,8 +584,13 @@ async function generatePDF() {
 
         const pages = packIntoPages(uploadedImages);
 
-        pages.forEach((page, pageIndex) => {
+        for (let pageIndex = 0; pageIndex < pages.length; pageIndex++) {
+            // Update progress and yield to let the browser repaint before heavy jsPDF work
+            loadingText.textContent = `Generating page ${pageIndex + 1} of ${pages.length}…`;
+            await new Promise(r => setTimeout(r, 0));
+
             if (pageIndex > 0) pdf.addPage();
+            const page = pages[pageIndex];
 
             for (const { img, row, col, colspan, rowspan } of page) {
                 const cellW = cellWidth * colspan + spacing * (colspan - 1);
@@ -472,18 +620,24 @@ async function generatePDF() {
             pdf.setTextColor(150, 150, 150);
             const pageLabel = `Page ${pageIndex + 1} of ${pages.length}`;
             pdf.text(pageLabel, (pageWidth - pdf.getTextWidth(pageLabel)) / 2, pageHeight - 12);
-        });
+        }
+
+        loadingText.textContent = 'Saving…';
+        await new Promise(r => setTimeout(r, 0));
 
         const rawName = filenameInput.value.trim();
         const today = new Date().toISOString().split('T')[0];
-        const filename = rawName ? `${rawName}.pdf` : `receipts_${today}.pdf`;
+        const baseName = rawName ? sanitizeFilename(rawName) : `receipts_${today}`;
+        const filename = `${baseName}.pdf`;
 
         pdf.save(filename);
         loadingOverlay.style.display = 'none';
+        loadingText.textContent = 'Preparing…';
         showToast(`"${filename}" saved successfully!`);
     } catch (error) {
         console.error('Error generating PDF:', error);
         loadingOverlay.style.display = 'none';
+        loadingText.textContent = 'Preparing…';
         showToast('Error generating PDF. Please try again.', 'error');
     }
 }
