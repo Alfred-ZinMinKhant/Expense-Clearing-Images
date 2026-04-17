@@ -4,7 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="Transform your receipt images into organized PDF documents with automatic numbering and smart layout">
+    <meta name="theme-color" content="#667eea">
     <title>Receipt Organizer - Convert Images to PDF</title>
+    <link rel="manifest" href="manifest.json">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -49,9 +51,12 @@
             <!-- Preview Section -->
             <section class="preview-section" id="previewSection" style="display: none;">
                 <div class="preview-header">
-                    <h2 class="preview-title">
-                        <span id="imageCount">0</span> Images Ready
-                    </h2>
+                    <div>
+                        <h2 class="preview-title">
+                            <span id="imageCount">0</span> Images Ready
+                        </h2>
+                        <p class="page-count-hint" id="pageCountHint"></p>
+                    </div>
                     <div class="preview-actions">
                         <button class="btn btn-secondary" id="addMoreBtn" title="Add more images">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -102,6 +107,7 @@
                 <div class="loading-content">
                     <div class="spinner"></div>
                     <p class="loading-text" id="loadingText">Preparing…</p>
+                    <button class="btn btn-secondary loading-cancel-btn" id="cancelPdfBtn">Cancel</button>
                 </div>
             </div>
         </main>

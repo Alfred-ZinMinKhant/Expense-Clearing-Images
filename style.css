@@ -256,6 +256,14 @@ body::before {
     font-weight: 700;
 }
 
+.page-count-hint {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    margin-top: 0.2rem;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+}
+
 .preview-actions {
     display: flex;
     gap: var(--spacing-sm);
@@ -723,6 +731,15 @@ body::before {
     font-size: 1.125rem;
     color: var(--text-secondary);
     font-weight: 500;
+}
+
+.loading-cancel-btn {
+    margin-top: var(--spacing-md);
+    opacity: 0.8;
+}
+
+.loading-cancel-btn:hover {
+    opacity: 1;
 }
 
 /* Footer */

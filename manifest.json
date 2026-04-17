@@ -1,0 +1,17 @@
+{
+    "name": "Receipt Organizer",
+    "short_name": "Receipts",
+    "description": "Transform receipt images into organized PDF documents",
+    "start_url": ".",
+    "display": "standalone",
+    "background_color": "#0f0f1e",
+    "theme_color": "#667eea",
+    "icons": [
+        {
+            "src": "icon.svg",
+            "sizes": "any",
+            "type": "image/svg+xml",
+            "purpose": "any maskable"
+        }
+    ]
+}

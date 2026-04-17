@@ -1,28 +1,30 @@
 // Receipt Organizer - Main Application Logic
 
-const MAX_IMAGES = 50;
+const MAX_IMAGES      = 50;
 const COMPRESS_MAX_DIM = 2000;
 const COMPRESS_QUALITY = 0.82;
-const DRAG_DELAY_MS = 200;
-const DRAG_CANCEL_PX = 10;
+const THUMB_MAX_DIM   = 300;   // preview card thumbnail — keeps display memory low
+const DRAG_DELAY_MS   = 200;
+const DRAG_CANCEL_PX  = 10;
 
-let uploadedImages = [];
-let pendingFiles = 0;
+let uploadedImages  = [];
+let pendingFiles    = 0;
 let insertionCounter = 0;
-let isAutoSort = true;
+let isAutoSort      = true;
+let pdfCancelled    = false;   // set by Cancel button during generation
 
 // Mouse drag state
 let dragSrcIndex = null;
 
 // Touch drag state
-let touchDragSrcIndex = null;
+let touchDragSrcIndex  = null;
 let touchDragActivated = false;
-let touchDragTimer = null;
-let touchClone = null;
+let touchDragTimer     = null;
+let touchClone         = null;
 let touchOffsetX = 0;
 let touchOffsetY = 0;
-let touchStartX = 0;
-let touchStartY = 0;
+let touchStartX  = 0;
+let touchStartY  = 0;
 
 // DOM Elements
 const uploadZone     = document.getElementById('uploadZone');
@@ -30,10 +32,12 @@ const fileInput      = document.getElementById('fileInput');
 const previewSection = document.getElementById('previewSection');
 const previewGrid    = document.getElementById('previewGrid');
 const imageCount     = document.getElementById('imageCount');
+const pageCountHint  = document.getElementById('pageCountHint');
 const generateBtn    = document.getElementById('generateBtn');
 const clearBtn       = document.getElementById('clearBtn');
 const addMoreBtn     = document.getElementById('addMoreBtn');
 const sortToggleBtn  = document.getElementById('sortToggleBtn');
+const cancelPdfBtn   = document.getElementById('cancelPdfBtn');
 const loadingOverlay = document.getElementById('loadingOverlay');
 const loadingText    = document.getElementById('loadingText');
 const filenameInput  = document.getElementById('filenameInput');
@@ -47,12 +51,13 @@ const modalCancel    = document.getElementById('modalCancel');
 function init() {
     uploadZone.addEventListener('click', () => fileInput.click());
     fileInput.addEventListener('change', handleFileSelect);
-    uploadZone.addEventListener('dragover', handleDragOver);
+    uploadZone.addEventListener('dragover',  handleDragOver);
     uploadZone.addEventListener('dragleave', handleDragLeave);
-    uploadZone.addEventListener('drop', handleDrop);
+    uploadZone.addEventListener('drop',      handleDrop);
     document.addEventListener('paste', handlePaste);
 
     generateBtn.addEventListener('click', generatePDF);
+    cancelPdfBtn.addEventListener('click', () => { pdfCancelled = true; });
     clearBtn.addEventListener('click', clearAll);
     addMoreBtn.addEventListener('click', () => fileInput.click());
     sortToggleBtn.addEventListener('click', handleSortToggle);
@@ -83,7 +88,6 @@ function handleDrop(e) {
     processFiles(files);
 }
 
-// Paste images directly from clipboard (Ctrl+V / mobile share)
 function handlePaste(e) {
     const files = Array.from(e.clipboardData.items)
         .filter(item => item.kind === 'file' && item.type.startsWith('image/'))
@@ -94,7 +98,6 @@ function handlePaste(e) {
 
 // ── Modal ─────────────────────────────────────────────────────────────────────
 
-// Replaces native confirm()/alert() — returns a Promise<boolean>
 function showModal(message, { confirmLabel = 'OK', cancelLabel = null } = {}) {
     return new Promise((resolve) => {
         modalMessage.textContent = message;
@@ -162,7 +165,6 @@ function activateManualOrder() {
     }
 }
 
-// Stable sort: numeric receipt number, ties broken by insertion order
 function sortImages() {
     uploadedImages.sort((a, b) => {
         const numA = parseInt(a.receiptNo, 10) || 999999;
@@ -174,22 +176,39 @@ function sortImages() {
 
 // ── Image Helpers ─────────────────────────────────────────────────────────────
 
-// Compress via canvas — resolves with {dataUrl, width, height}, rejects on decode failure
-function compressImage(originalDataUrl) {
+// Decode once, generate both a full-res version (for PDF) and a small thumbnail
+// (for the preview card) — cuts preview memory ~6× vs using the full image for both.
+function processImage(originalDataUrl) {
     return new Promise((resolve, reject) => {
         const img = new Image();
         img.onload = () => {
-            let { width, height } = img;
-            if (width > COMPRESS_MAX_DIM || height > COMPRESS_MAX_DIM) {
-                const ratio = Math.min(COMPRESS_MAX_DIM / width, COMPRESS_MAX_DIM / height);
-                width  = Math.round(width  * ratio);
-                height = Math.round(height * ratio);
+            const origW = img.naturalWidth;
+            const origH = img.naturalHeight;
+
+            // --- Full-res for PDF ---
+            let pdfW = origW, pdfH = origH;
+            if (pdfW > COMPRESS_MAX_DIM || pdfH > COMPRESS_MAX_DIM) {
+                const ratio = Math.min(COMPRESS_MAX_DIM / pdfW, COMPRESS_MAX_DIM / pdfH);
+                pdfW = Math.round(pdfW * ratio);
+                pdfH = Math.round(pdfH * ratio);
             }
-            const canvas = document.createElement('canvas');
-            canvas.width  = width;
-            canvas.height = height;
-            canvas.getContext('2d').drawImage(img, 0, 0, width, height);
-            resolve({ dataUrl: canvas.toDataURL('image/jpeg', COMPRESS_QUALITY), width, height });
+            const pdfCanvas = document.createElement('canvas');
+            pdfCanvas.width  = pdfW;
+            pdfCanvas.height = pdfH;
+            pdfCanvas.getContext('2d').drawImage(img, 0, 0, pdfW, pdfH);
+            const dataUrl = pdfCanvas.toDataURL('image/jpeg', COMPRESS_QUALITY);
+
+            // --- Small thumbnail for preview card ---
+            const thumbScale  = Math.min(THUMB_MAX_DIM / origW, THUMB_MAX_DIM / origH, 1);
+            const thumbW      = Math.round(origW * thumbScale);
+            const thumbH      = Math.round(origH * thumbScale);
+            const thumbCanvas = document.createElement('canvas');
+            thumbCanvas.width  = thumbW;
+            thumbCanvas.height = thumbH;
+            thumbCanvas.getContext('2d').drawImage(img, 0, 0, thumbW, thumbH);
+            const thumbnailUrl = thumbCanvas.toDataURL('image/jpeg', 0.7);
+
+            resolve({ dataUrl, thumbnailUrl, width: pdfW, height: pdfH });
         };
         img.onerror = () => reject(new Error('Image decode failed'));
         img.src = originalDataUrl;
@@ -215,7 +234,7 @@ function isUnsupportedFormat(file) {
 async function processFiles(files) {
     if (files.length === 0) return;
 
-    // Detect HEIC/HEIF before trying to decode — canvas can't handle them
+    // Reject HEIC/HEIF before any decode attempt
     const heicFiles = files.filter(isUnsupportedFormat);
     if (heicFiles.length > 0) {
         showToast(
@@ -223,6 +242,26 @@ async function processFiles(files) {
             'error'
         );
         files = files.filter(f => !isUnsupportedFormat(f));
+        if (files.length === 0) return;
+    }
+
+    // Duplicate detection — check both against already-added images and within this batch
+    const seenKeys = new Set(uploadedImages.map(img => `${img.name}|${img.fileSize}`));
+    const dupNames = [];
+    const uniqueFiles = [];
+    for (const file of files) {
+        const key = `${file.name}|${file.size}`;
+        if (seenKeys.has(key)) {
+            dupNames.push(file.name);
+        } else {
+            seenKeys.add(key);
+            uniqueFiles.push(file);
+        }
+    }
+    if (dupNames.length > 0) {
+        const preview = dupNames.slice(0, 3).join(', ') + (dupNames.length > 3 ? '…' : '');
+        showToast(`${dupNames.length} duplicate(s) skipped: ${preview}`, 'error');
+        files = uniqueFiles;
         if (files.length === 0) return;
     }
 
@@ -256,11 +295,13 @@ async function processFiles(files) {
 
         reader.onload = async (e) => {
             try {
-                const { dataUrl, width, height } = await compressImage(e.target.result);
+                const { dataUrl, thumbnailUrl, width, height } = await processImage(e.target.result);
                 const receiptNo = extractReceiptNumber(file.name, startIndex + fileIndex + 1);
                 uploadedImages.push({
                     dataUrl,
+                    thumbnailUrl,
                     name: file.name,
+                    fileSize: file.size,
                     receiptNo,
                     width,
                     height,
@@ -278,7 +319,6 @@ async function processFiles(files) {
             }
         };
 
-        // If the file can't be read at all, clean up the pending counter
         reader.onerror = () => {
             pendingFiles--;
             updateUploadingIndicator();
@@ -296,7 +336,6 @@ function updateUploadingIndicator() {
         : 'Drop receipt images here';
 }
 
-// Only matches explicit "Receipt No X" patterns — generic filenames use the index fallback
 function extractReceiptNumber(filename, fallback) {
     const match = filename.match(/receipt[\s_-]*no[\s_-]*(\d+)/i);
     if (match) return match[1];
@@ -305,7 +344,6 @@ function extractReceiptNumber(filename, fallback) {
 
 // ── Slot Packing ──────────────────────────────────────────────────────────────
 
-// Single source of truth — used by both page count and PDF drawing
 function packIntoPages(images) {
     const pages = [];
     let i = 0;
@@ -357,17 +395,22 @@ function updatePreview() {
     previewSection.style.display = 'block';
     imageCount.textContent = uploadedImages.length;
 
+    // Page count estimate
+    const pageCount = packIntoPages(uploadedImages).length;
+    pageCountHint.textContent = `${pageCount} page${pageCount !== 1 ? 's' : ''}`;
+
     const fragment = document.createDocumentFragment();
     uploadedImages.forEach((img, index) => {
         const item = document.createElement('div');
-        item.className  = 'preview-item';
-        item.draggable  = true;
+        item.className     = 'preview-item';
+        item.draggable     = true;
         item.dataset.index = index;
-        item.tabIndex   = 0;
+        item.tabIndex      = 0;
         item.setAttribute('role', 'listitem');
         item.setAttribute('aria-label',
             `Receipt ${img.receiptNo}, ${img.name}. Press arrow keys to reorder.`);
 
+        // thumbnailUrl is used for display; dataUrl is kept for PDF only
         item.innerHTML = `
             <button class="delete-btn" data-index="${index}" title="Remove image">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
@@ -375,7 +418,7 @@ function updatePreview() {
                     <line x1="6" y1="6" x2="18" y2="18"></line>
                 </svg>
             </button>
-            <img src="${escapeHtml(img.dataUrl)}" alt="" class="preview-image">
+            <img src="${escapeHtml(img.thumbnailUrl)}" alt="" class="preview-image">
             <div class="preview-info">
                 <span class="preview-name" title="${escapeHtml(img.name)}">${escapeHtml(img.name)}</span>
                 <label class="receipt-label">
@@ -417,7 +460,6 @@ function updatePreview() {
         input.addEventListener('mousedown', e => e.stopPropagation());
         input.addEventListener('touchstart', e => e.stopPropagation(), { passive: true });
 
-        // Live validation: red border while field is empty
         input.addEventListener('input', (e) => {
             e.target.classList.toggle('receipt-input--error', e.target.value.trim() === '');
         });
@@ -435,7 +477,7 @@ function updatePreview() {
         });
     });
 
-    // Keyboard reorder — ↑/↓ arrow keys on focused cards
+    // Keyboard reorder — ↑/↓ on focused cards
     previewGrid.querySelectorAll('.preview-item').forEach(item => {
         item.addEventListener('keydown', (e) => {
             if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
@@ -458,7 +500,6 @@ function updatePreview() {
         item.addEventListener('dragleave', handleCardDragLeave);
         item.addEventListener('drop',      handleCardDrop);
         item.addEventListener('dragend',   handleCardDragEnd);
-        // Touch drag-to-reorder
         item.addEventListener('touchstart', handleTouchStart, { passive: true });
         item.addEventListener('touchmove',  handleTouchMove,  { passive: false });
         item.addEventListener('touchend',   handleTouchEnd);
@@ -468,11 +509,11 @@ function updatePreview() {
 // ── Clear ─────────────────────────────────────────────────────────────────────
 
 function clearAll() {
-    const snapshot              = uploadedImages.map(img => ({ ...img }));
-    const prevInsertionCounter  = insertionCounter;
-    uploadedImages = [];
+    const snapshot             = uploadedImages.map(img => ({ ...img }));
+    const prevInsertionCounter = insertionCounter;
+    uploadedImages   = [];
     insertionCounter = 0;
-    isAutoSort = true;
+    isAutoSort       = true;
     updateSortToggleLabel();
     updatePreview();
     fileInput.value = '';
@@ -550,14 +591,12 @@ function handleCardDragEnd() {
 }
 
 // ── Touch Drag-to-Reorder ─────────────────────────────────────────────────────
-// 200ms hold activates drag; moving > DRAG_CANCEL_PX before that cancels it
-// so normal scrolling is unaffected.
 
 function handleTouchStart(e) {
-    const touch   = e.touches[0];
-    touchStartX   = touch.clientX;
-    touchStartY   = touch.clientY;
-    touchDragSrcIndex  = parseInt(this.dataset.index, 10);
+    const touch       = e.touches[0];
+    touchStartX       = touch.clientX;
+    touchStartY       = touch.clientY;
+    touchDragSrcIndex = parseInt(this.dataset.index, 10);
     touchDragActivated = false;
 
     this.classList.add('touch-drag-pending');
@@ -573,16 +612,16 @@ function handleTouchStart(e) {
 
         touchClone = this.cloneNode(true);
         Object.assign(touchClone.style, {
-            position:     'fixed',
-            left:         `${rect.left}px`,
-            top:          `${rect.top}px`,
-            width:        `${rect.width}px`,
-            opacity:      '0.85',
-            pointerEvents:'none',
-            zIndex:       '9999',
-            transform:    'scale(1.05)',
-            transition:   'none',
-            boxShadow:    '0 8px 32px rgba(0,0,0,0.5)',
+            position:      'fixed',
+            left:          `${rect.left}px`,
+            top:           `${rect.top}px`,
+            width:         `${rect.width}px`,
+            opacity:       '0.85',
+            pointerEvents: 'none',
+            zIndex:        '9999',
+            transform:     'scale(1.05)',
+            transition:    'none',
+            boxShadow:     '0 8px 32px rgba(0,0,0,0.5)',
         });
         document.body.appendChild(touchClone);
         this.classList.add('dragging');
@@ -677,6 +716,7 @@ async function generatePDF() {
         if (!ok) return;
     }
 
+    pdfCancelled = false;
     loadingOverlay.style.display = 'flex';
     loadingText.textContent = 'Preparing…';
 
@@ -696,8 +736,10 @@ async function generatePDF() {
         const pages = packIntoPages(uploadedImages);
 
         for (let pageIndex = 0; pageIndex < pages.length; pageIndex++) {
+            if (pdfCancelled) break;
+
             loadingText.textContent = `Generating page ${pageIndex + 1} of ${pages.length}…`;
-            await new Promise(r => setTimeout(r, 0)); // yield so the browser repaints
+            await new Promise(r => setTimeout(r, 0));
 
             if (pageIndex > 0) pdf.addPage();
             const page = pages[pageIndex];
@@ -715,6 +757,7 @@ async function generatePDF() {
                 const x = margin + col * (cellWidth  + spacing) + (cellW - imgW) / 2;
                 const y = margin + row * (cellHeight + spacing) + (availableH - imgH) / 2;
 
+                // dataUrl (full-res) used for PDF — not the thumbnail
                 pdf.addImage(img.dataUrl, img.format, x, y, imgW, imgH);
 
                 const caption  = `Receipt No: ${img.receiptNo}`;
@@ -732,6 +775,14 @@ async function generatePDF() {
             pdf.text(pageLabel, (pageWidth - pdf.getTextWidth(pageLabel)) / 2, pageHeight - 12);
         }
 
+        if (pdfCancelled) {
+            pdfCancelled = false;
+            loadingOverlay.style.display = 'none';
+            loadingText.textContent = 'Preparing…';
+            showToast('PDF generation cancelled.', 'error');
+            return;
+        }
+
         loadingText.textContent = 'Saving…';
         await new Promise(r => setTimeout(r, 0));
 
@@ -746,6 +797,7 @@ async function generatePDF() {
         showToast(`"${filename}" saved successfully!`);
     } catch (error) {
         console.error('Error generating PDF:', error);
+        pdfCancelled = false;
         loadingOverlay.style.display = 'none';
         loadingText.textContent = 'Preparing…';
         showToast('Error generating PDF. Please try again.', 'error');

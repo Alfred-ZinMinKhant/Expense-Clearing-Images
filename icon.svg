@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Dark background tile -->
+  <rect width="512" height="512" rx="96" fill="#1a1a2e"/>
+  <!-- Receipt card -->
+  <rect x="120" y="88" width="272" height="336" rx="20" fill="#667eea"/>
+  <!-- Shimmer overlay -->
+  <rect x="120" y="88" width="272" height="336" rx="20" fill="url(#g)" opacity="0.3"/>
+  <!-- Text lines -->
+  <rect x="160" y="192" width="192" height="18" rx="9" fill="white" opacity="0.95"/>
+  <rect x="160" y="236" width="144" height="18" rx="9" fill="white" opacity="0.75"/>
+  <rect x="160" y="280" width="168" height="18" rx="9" fill="white" opacity="0.75"/>
+  <rect x="160" y="324" width="112" height="18" rx="9" fill="white" opacity="0.6"/>
+  <!-- Top fold / dog-ear -->
+  <path d="M328 88 L392 152 L328 152 Z" fill="#764ba2" opacity="0.8"/>
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="white"/>
+      <stop offset="100%" stop-color="transparent"/>
+    </linearGradient>
+  </defs>
+</svg>
