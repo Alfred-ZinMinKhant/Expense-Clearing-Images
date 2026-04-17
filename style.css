@@ -344,6 +344,62 @@ body::before {
     animation: scaleIn 0.3s ease;
     position: relative;
     overflow: hidden;
+    cursor: grab;
+}
+
+.preview-item[draggable="true"]:active {
+    cursor: grabbing;
+}
+
+.preview-item.dragging {
+    opacity: 0.4;
+}
+
+.preview-item.drag-target {
+    border-color: var(--accent-color);
+    box-shadow: 0 0 0 2px var(--accent-color);
+    transform: scale(1.02);
+}
+
+/* Delete button */
+.delete-btn {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 28px;
+    height: 28px;
+    background: rgba(239, 68, 68, 0.85);
+    border: none;
+    border-radius: 50%;
+    color: white;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transition: opacity var(--transition-fast), background var(--transition-fast), transform var(--transition-fast);
+    z-index: 2;
+}
+
+.preview-item:hover .delete-btn {
+    opacity: 1;
+}
+
+/* Always show delete button on touch-only devices (no hover available) */
+@media (hover: none) {
+    .delete-btn {
+        opacity: 1;
+    }
+}
+
+.delete-btn:hover {
+    background: rgba(220, 38, 38, 1);
+    transform: scale(1.1);
+}
+
+.delete-btn svg {
+    width: 14px;
+    height: 14px;
 }
 
 @keyframes scaleIn {
@@ -395,6 +451,141 @@ body::before {
     font-size: 0.75rem;
     font-weight: 600;
     white-space: nowrap;
+}
+
+.receipt-label {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+.receipt-badge-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.edit-icon {
+    width: 11px;
+    height: 11px;
+    stroke: var(--text-muted);
+    flex-shrink: 0;
+}
+
+.preview-badge {
+    position: relative;
+}
+
+.receipt-input {
+    border: 2px solid transparent;
+    cursor: pointer;
+    width: 80px;
+    text-align: center;
+    font-family: inherit;
+    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.receipt-input:hover {
+    border-color: rgba(255, 255, 255, 0.4);
+}
+
+.receipt-input:focus {
+    outline: none;
+    border-color: white;
+    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.2);
+    cursor: text;
+}
+
+.edit-hint {
+    font-size: 0.65rem;
+    color: var(--text-muted);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    font-weight: 500;
+}
+
+/* Filename Input Row */
+.filename-row {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    margin-bottom: var(--spacing-md);
+    padding: 0.6rem var(--spacing-sm);
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-md);
+}
+
+.filename-icon {
+    width: 18px;
+    height: 18px;
+    stroke: var(--text-muted);
+    flex-shrink: 0;
+}
+
+.filename-input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid var(--glass-border);
+    color: var(--text-primary);
+    font-size: 0.9rem;
+    font-family: inherit;
+    padding: 0.2rem 0.4rem;
+    transition: border-color var(--transition-fast);
+}
+
+.filename-input:focus {
+    outline: none;
+    border-bottom-color: var(--primary-color);
+}
+
+.filename-input::placeholder {
+    color: var(--text-muted);
+}
+
+.filename-suffix {
+    font-size: 0.875rem;
+    color: var(--text-muted);
+    font-weight: 500;
+    flex-shrink: 0;
+}
+
+/* Toast Notification */
+.toast {
+    position: fixed;
+    bottom: 2rem;
+    left: 50%;
+    transform: translateX(-50%) translateY(80px);
+    padding: 0.75rem 1.5rem;
+    border-radius: var(--radius-md);
+    font-size: 0.9rem;
+    font-weight: 600;
+    font-family: inherit;
+    z-index: 2000;
+    opacity: 0;
+    transition: transform 0.35s ease, opacity 0.35s ease;
+    pointer-events: none;
+    white-space: nowrap;
+    box-shadow: var(--shadow-lg);
+}
+
+.toast-success {
+    background: linear-gradient(135deg, #22c55e, #16a34a);
+    color: white;
+}
+
+.toast-error {
+    background: linear-gradient(135deg, #ef4444, #dc2626);
+    color: white;
+}
+
+.toast-show {
+    transform: translateX(-50%) translateY(0);
+    opacity: 1;
 }
 
 /* Loading Overlay */

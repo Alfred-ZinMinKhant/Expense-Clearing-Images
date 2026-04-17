@@ -69,6 +69,14 @@
                         </button>
                     </div>
                 </div>
+                <div class="filename-row">
+                    <svg class="filename-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                        <polyline points="14 2 14 8 20 8"></polyline>
+                    </svg>
+                    <input type="text" id="filenameInput" class="filename-input" placeholder="PDF filename (optional)" maxlength="100">
+                    <span class="filename-suffix">.pdf</span>
+                </div>
                 <div class="preview-grid" id="previewGrid"></div>
             </section>
 
@@ -86,7 +94,10 @@
         </footer>
     </div>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <div class="toast" id="toast"></div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"
+            onerror="document.getElementById('generateBtn').disabled=true;document.getElementById('generateBtn').title='PDF library failed to load — check your internet connection and refresh.';"></script>
     <script src="app.js"></script>
 </body>
 </html>
