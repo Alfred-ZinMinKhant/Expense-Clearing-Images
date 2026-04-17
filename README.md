@@ -129,5 +129,5 @@ Free to use and modify for personal and commercial projects.
 
 **Previous Python Version**: The original Python script (`image_to_pdf.py`) is still available in this repository for reference or local command-line use.
 
-Built by ALFRED with ❤️ for easy expense management
+Built by ALFRED with ❤️ for easy expense clearing
 

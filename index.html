@@ -68,7 +68,7 @@
                                 <polyline points="3 6 4 7 6 5"></polyline>
                                 <polyline points="3 12 4 13 6 11"></polyline>
                             </svg>
-                            Auto Sort
+                            <span>Auto Sort</span>
                         </button>
                         <button class="btn btn-secondary" id="clearBtn">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -107,8 +107,19 @@
         </main>
 
         <footer class="footer">
-            <p>Built by ALFRED with ❤️ for easy expense management</p>
+            <p>Built by ALFRED with ❤️ for easy expense clearing</p>
         </footer>
+    </div>
+
+    <!-- In-page confirmation modal — replaces native confirm()/alert() -->
+    <div class="modal-overlay" id="modalOverlay" style="display: none;" role="dialog" aria-modal="true">
+        <div class="modal-box">
+            <p class="modal-message" id="modalMessage"></p>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" id="modalCancel">Cancel</button>
+                <button class="btn btn-primary" id="modalConfirm">OK</button>
+            </div>
+        </div>
     </div>
 
     <div class="toast" id="toast"></div>

@@ -25,29 +25,31 @@ let touchStartX = 0;
 let touchStartY = 0;
 
 // DOM Elements
-const uploadZone = document.getElementById('uploadZone');
-const fileInput = document.getElementById('fileInput');
+const uploadZone     = document.getElementById('uploadZone');
+const fileInput      = document.getElementById('fileInput');
 const previewSection = document.getElementById('previewSection');
-const previewGrid = document.getElementById('previewGrid');
-const imageCount = document.getElementById('imageCount');
-const generateBtn = document.getElementById('generateBtn');
-const clearBtn = document.getElementById('clearBtn');
-const addMoreBtn = document.getElementById('addMoreBtn');
-const sortToggleBtn = document.getElementById('sortToggleBtn');
+const previewGrid    = document.getElementById('previewGrid');
+const imageCount     = document.getElementById('imageCount');
+const generateBtn    = document.getElementById('generateBtn');
+const clearBtn       = document.getElementById('clearBtn');
+const addMoreBtn     = document.getElementById('addMoreBtn');
+const sortToggleBtn  = document.getElementById('sortToggleBtn');
 const loadingOverlay = document.getElementById('loadingOverlay');
-const loadingText = document.getElementById('loadingText');
-const filenameInput = document.getElementById('filenameInput');
-const toast = document.getElementById('toast');
+const loadingText    = document.getElementById('loadingText');
+const filenameInput  = document.getElementById('filenameInput');
+const toast          = document.getElementById('toast');
+const modalOverlay   = document.getElementById('modalOverlay');
+const modalMessage   = document.getElementById('modalMessage');
+const modalConfirm   = document.getElementById('modalConfirm');
+const modalCancel    = document.getElementById('modalCancel');
 
 // Initialize
 function init() {
     uploadZone.addEventListener('click', () => fileInput.click());
     fileInput.addEventListener('change', handleFileSelect);
-
     uploadZone.addEventListener('dragover', handleDragOver);
     uploadZone.addEventListener('dragleave', handleDragLeave);
     uploadZone.addEventListener('drop', handleDrop);
-
     document.addEventListener('paste', handlePaste);
 
     generateBtn.addEventListener('click', generatePDF);
@@ -60,7 +62,6 @@ function init() {
 
 function handleFileSelect(e) {
     const files = Array.from(e.target.files).filter(f => f.type.startsWith('image/'));
-    // Reset so the same file can be re-selected after clear
     e.target.value = '';
     processFiles(files);
 }
@@ -91,6 +92,45 @@ function handlePaste(e) {
     if (files.length > 0) processFiles(files);
 }
 
+// ── Modal ─────────────────────────────────────────────────────────────────────
+
+// Replaces native confirm()/alert() — returns a Promise<boolean>
+function showModal(message, { confirmLabel = 'OK', cancelLabel = null } = {}) {
+    return new Promise((resolve) => {
+        modalMessage.textContent = message;
+        modalConfirm.textContent = confirmLabel;
+
+        if (cancelLabel) {
+            modalCancel.textContent = cancelLabel;
+            modalCancel.style.display = '';
+        } else {
+            modalCancel.style.display = 'none';
+        }
+
+        modalOverlay.style.display = 'flex';
+        modalConfirm.focus();
+
+        const cleanup = (result) => {
+            modalOverlay.style.display = 'none';
+            modalConfirm.removeEventListener('click', onConfirm);
+            modalCancel.removeEventListener('click', onCancel);
+            document.removeEventListener('keydown', onKey);
+            resolve(result);
+        };
+
+        const onConfirm = () => cleanup(true);
+        const onCancel  = () => cleanup(false);
+        const onKey = (e) => {
+            if (e.key === 'Escape') cleanup(false);
+            if (e.key === 'Enter') { e.preventDefault(); cleanup(true); }
+        };
+
+        modalConfirm.addEventListener('click', onConfirm);
+        modalCancel.addEventListener('click', onCancel);
+        document.addEventListener('keydown', onKey);
+    });
+}
+
 // ── Sort Mode ─────────────────────────────────────────────────────────────────
 
 function handleSortToggle() {
@@ -103,12 +143,13 @@ function handleSortToggle() {
 }
 
 function updateSortToggleLabel() {
+    const span = sortToggleBtn.querySelector('span');
     if (isAutoSort) {
-        sortToggleBtn.textContent = 'Auto Sort';
+        span.textContent = 'Auto Sort';
         sortToggleBtn.dataset.mode = 'auto';
         sortToggleBtn.title = 'Auto-sorting by receipt number — click to switch to manual order';
     } else {
-        sortToggleBtn.textContent = 'Manual Order';
+        span.textContent = 'Manual Order';
         sortToggleBtn.dataset.mode = 'manual';
         sortToggleBtn.title = 'Manual order active — click to auto-sort by receipt number';
     }
@@ -133,43 +174,57 @@ function sortImages() {
 
 // ── Image Helpers ─────────────────────────────────────────────────────────────
 
-// Compress image via canvas — returns Promise<{dataUrl, width, height}>
+// Compress via canvas — resolves with {dataUrl, width, height}, rejects on decode failure
 function compressImage(originalDataUrl) {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
         const img = new Image();
         img.onload = () => {
             let { width, height } = img;
             if (width > COMPRESS_MAX_DIM || height > COMPRESS_MAX_DIM) {
                 const ratio = Math.min(COMPRESS_MAX_DIM / width, COMPRESS_MAX_DIM / height);
-                width = Math.round(width * ratio);
+                width  = Math.round(width  * ratio);
                 height = Math.round(height * ratio);
             }
             const canvas = document.createElement('canvas');
-            canvas.width = width;
+            canvas.width  = width;
             canvas.height = height;
             canvas.getContext('2d').drawImage(img, 0, 0, width, height);
             resolve({ dataUrl: canvas.toDataURL('image/jpeg', COMPRESS_QUALITY), width, height });
         };
+        img.onerror = () => reject(new Error('Image decode failed'));
         img.src = originalDataUrl;
     });
 }
 
-// Sanitize PDF filename — strip characters illegal on common filesystems
 function sanitizeFilename(name) {
     return name.replace(/[/\\:*?"<>|]/g, '_').replace(/\s+/g, ' ').trim();
 }
 
-// Escape HTML to prevent XSS when injecting user strings into innerHTML
 function escapeHtml(str) {
     const div = document.createElement('div');
     div.textContent = str;
     return div.innerHTML;
 }
 
+function isUnsupportedFormat(file) {
+    return /heic|heif/i.test(file.type) || /\.(heic|heif)$/i.test(file.name);
+}
+
 // ── Process Files ─────────────────────────────────────────────────────────────
 
-function processFiles(files) {
+async function processFiles(files) {
     if (files.length === 0) return;
+
+    // Detect HEIC/HEIF before trying to decode — canvas can't handle them
+    const heicFiles = files.filter(isUnsupportedFormat);
+    if (heicFiles.length > 0) {
+        showToast(
+            `${heicFiles.length} HEIC/HEIF file(s) skipped — export as JPG from Photos first.`,
+            'error'
+        );
+        files = files.filter(f => !isUnsupportedFormat(f));
+        if (files.length === 0) return;
+    }
 
     const remaining = MAX_IMAGES - uploadedImages.length - pendingFiles;
     if (remaining <= 0) {
@@ -185,18 +240,20 @@ function processFiles(files) {
     const oversized = files.filter(f => f.size > MAX_SIZE_MB * 1024 * 1024);
     if (oversized.length > 0) {
         const names = oversized.map(f => f.name).join('\n');
-        if (!confirm(`The following file(s) are over ${MAX_SIZE_MB}MB:\n\n${names}\n\nContinue anyway?`)) {
-            return;
-        }
+        const ok = await showModal(
+            `The following file(s) are over ${MAX_SIZE_MB}MB:\n\n${names}\n\nContinue anyway?`,
+            { confirmLabel: 'Continue', cancelLabel: 'Cancel' }
+        );
+        if (!ok) return;
     }
 
-    // Snapshot current length so async callbacks have a stable fallback base
     const startIndex = uploadedImages.length;
     pendingFiles += files.length;
     updateUploadingIndicator();
 
     files.forEach((file, fileIndex) => {
         const reader = new FileReader();
+
         reader.onload = async (e) => {
             try {
                 const { dataUrl, width, height } = await compressImage(e.target.result);
@@ -212,12 +269,22 @@ function processFiles(files) {
                     insertionOrder: insertionCounter++,
                 });
                 if (isAutoSort) sortImages();
+            } catch {
+                showToast(`Could not process "${file.name}" — unsupported or corrupt image.`, 'error');
             } finally {
                 pendingFiles--;
                 updateUploadingIndicator();
                 updatePreview();
             }
         };
+
+        // If the file can't be read at all, clean up the pending counter
+        reader.onerror = () => {
+            pendingFiles--;
+            updateUploadingIndicator();
+            showToast(`Failed to read "${file.name}".`, 'error');
+        };
+
         reader.readAsDataURL(file);
     });
 }
@@ -229,9 +296,7 @@ function updateUploadingIndicator() {
         : 'Drop receipt images here';
 }
 
-// Extract Receipt Number — only matches explicit "Receipt No X" patterns.
-// Generic filenames (screenshots, etc.) fall through to the sequential fallback
-// so each image gets a unique number instead of a shared date fragment.
+// Only matches explicit "Receipt No X" patterns — generic filenames use the index fallback
 function extractReceiptNumber(filename, fallback) {
     const match = filename.match(/receipt[\s_-]*no[\s_-]*(\d+)/i);
     if (match) return match[1];
@@ -240,14 +305,13 @@ function extractReceiptNumber(filename, fallback) {
 
 // ── Slot Packing ──────────────────────────────────────────────────────────────
 
-// Single source of truth for 2×2 grid layout used by both page count and PDF drawing.
-// Returns: array of pages, each page = array of { img, row, col, colspan, rowspan }
+// Single source of truth — used by both page count and PDF drawing
 function packIntoPages(images) {
     const pages = [];
     let i = 0;
     while (i < images.length) {
         const slots = [[false, false], [false, false]];
-        const page = [];
+        const page  = [];
         let j = i;
         while (j < images.length) {
             const img = images[j];
@@ -296,11 +360,14 @@ function updatePreview() {
     const fragment = document.createDocumentFragment();
     uploadedImages.forEach((img, index) => {
         const item = document.createElement('div');
-        item.className = 'preview-item';
-        item.draggable = true;
+        item.className  = 'preview-item';
+        item.draggable  = true;
         item.dataset.index = index;
+        item.tabIndex   = 0;
+        item.setAttribute('role', 'listitem');
+        item.setAttribute('aria-label',
+            `Receipt ${img.receiptNo}, ${img.name}. Press arrow keys to reorder.`);
 
-        // escapeHtml used on all user-controlled strings to prevent XSS
         item.innerHTML = `
             <button class="delete-btn" data-index="${index}" title="Remove image">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
@@ -330,12 +397,18 @@ function updatePreview() {
     previewGrid.innerHTML = '';
     previewGrid.appendChild(fragment);
 
-    // Delete buttons
+    // Delete buttons — with undo via toast
     previewGrid.querySelectorAll('.delete-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
             e.stopPropagation();
-            uploadedImages.splice(parseInt(btn.dataset.index, 10), 1);
+            const idx      = parseInt(btn.dataset.index, 10);
+            const snapshot = uploadedImages.map(img => ({ ...img }));
+            uploadedImages.splice(idx, 1);
             updatePreview();
+            showToast('Image removed.', 'success', () => {
+                uploadedImages = snapshot;
+                updatePreview();
+            });
         });
     });
 
@@ -350,7 +423,7 @@ function updatePreview() {
         });
 
         input.addEventListener('change', (e) => {
-            const idx = parseInt(e.target.dataset.index, 10);
+            const idx    = parseInt(e.target.dataset.index, 10);
             const newVal = e.target.value.trim();
             uploadedImages[idx].receiptNo = newVal || String(idx + 1);
             e.target.value = uploadedImages[idx].receiptNo;
@@ -362,38 +435,79 @@ function updatePreview() {
         });
     });
 
-    // Drag-to-reorder (mouse + touch)
+    // Keyboard reorder — ↑/↓ arrow keys on focused cards
+    previewGrid.querySelectorAll('.preview-item').forEach(item => {
+        item.addEventListener('keydown', (e) => {
+            if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+            e.preventDefault();
+            const idx    = parseInt(item.dataset.index, 10);
+            const newIdx = e.key === 'ArrowUp' ? idx - 1 : idx + 1;
+            if (newIdx < 0 || newIdx >= uploadedImages.length) return;
+            activateManualOrder();
+            const [moved] = uploadedImages.splice(idx, 1);
+            uploadedImages.splice(newIdx, 0, moved);
+            updatePreview();
+            previewGrid.querySelector(`[data-index="${newIdx}"]`)?.focus();
+        });
+    });
+
+    // Mouse drag-to-reorder
     previewGrid.querySelectorAll('.preview-item').forEach(item => {
         item.addEventListener('dragstart', handleCardDragStart);
-        item.addEventListener('dragover', handleCardDragOver);
+        item.addEventListener('dragover',  handleCardDragOver);
         item.addEventListener('dragleave', handleCardDragLeave);
-        item.addEventListener('drop', handleCardDrop);
-        item.addEventListener('dragend', handleCardDragEnd);
+        item.addEventListener('drop',      handleCardDrop);
+        item.addEventListener('dragend',   handleCardDragEnd);
+        // Touch drag-to-reorder
         item.addEventListener('touchstart', handleTouchStart, { passive: true });
-        item.addEventListener('touchmove', handleTouchMove, { passive: false });
-        item.addEventListener('touchend', handleTouchEnd);
+        item.addEventListener('touchmove',  handleTouchMove,  { passive: false });
+        item.addEventListener('touchend',   handleTouchEnd);
     });
 }
 
 // ── Clear ─────────────────────────────────────────────────────────────────────
 
 function clearAll() {
+    const snapshot              = uploadedImages.map(img => ({ ...img }));
+    const prevInsertionCounter  = insertionCounter;
     uploadedImages = [];
     insertionCounter = 0;
     isAutoSort = true;
     updateSortToggleLabel();
     updatePreview();
     fileInput.value = '';
+    showToast('All images cleared.', 'success', () => {
+        uploadedImages   = snapshot;
+        insertionCounter = prevInsertionCounter;
+        updatePreview();
+    });
 }
 
-// ── Toast ─────────────────────────────────────────────────────────────────────
+// ── Toast (with optional Undo action) ────────────────────────────────────────
 
 let toastTimer;
-function showToast(message, type = 'success') {
-    toast.textContent = message;
+function showToast(message, type = 'success', undoCallback = null) {
+    toast.innerHTML = '';
+
+    const msg = document.createElement('span');
+    msg.textContent = message;
+    toast.appendChild(msg);
+
+    if (undoCallback) {
+        const undoBtn = document.createElement('button');
+        undoBtn.className   = 'toast-undo-btn';
+        undoBtn.textContent = 'Undo';
+        undoBtn.addEventListener('click', () => {
+            clearTimeout(toastTimer);
+            toast.classList.remove('toast-show');
+            undoCallback();
+        });
+        toast.appendChild(undoBtn);
+    }
+
     toast.className = `toast toast-${type} toast-show`;
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => toast.classList.remove('toast-show'), 3000);
+    toastTimer = setTimeout(() => toast.classList.remove('toast-show'), 4000);
 }
 
 // ── Mouse Drag-to-Reorder ─────────────────────────────────────────────────────
@@ -436,41 +550,39 @@ function handleCardDragEnd() {
 }
 
 // ── Touch Drag-to-Reorder ─────────────────────────────────────────────────────
-// Uses a 200ms hold delay so normal scrolling isn't blocked.
-// If the finger moves more than DRAG_CANCEL_PX before the timer fires,
-// the drag is cancelled and the browser handles the scroll.
+// 200ms hold activates drag; moving > DRAG_CANCEL_PX before that cancels it
+// so normal scrolling is unaffected.
 
 function handleTouchStart(e) {
-    const touch = e.touches[0];
-    touchStartX = touch.clientX;
-    touchStartY = touch.clientY;
-    touchDragSrcIndex = parseInt(this.dataset.index, 10);
+    const touch   = e.touches[0];
+    touchStartX   = touch.clientX;
+    touchStartY   = touch.clientY;
+    touchDragSrcIndex  = parseInt(this.dataset.index, 10);
     touchDragActivated = false;
 
     this.classList.add('touch-drag-pending');
 
-    // Arrow function captures `this` from the enclosing event handler scope
     touchDragTimer = setTimeout(() => {
         touchDragActivated = true;
         this.classList.remove('touch-drag-pending');
         activateManualOrder();
 
-        const rect = this.getBoundingClientRect();
+        const rect   = this.getBoundingClientRect();
         touchOffsetX = touchStartX - rect.left;
         touchOffsetY = touchStartY - rect.top;
 
         touchClone = this.cloneNode(true);
         Object.assign(touchClone.style, {
-            position: 'fixed',
-            left: `${rect.left}px`,
-            top: `${rect.top}px`,
-            width: `${rect.width}px`,
-            opacity: '0.85',
-            pointerEvents: 'none',
-            zIndex: '9999',
-            transform: 'scale(1.05)',
-            transition: 'none',
-            boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
+            position:     'fixed',
+            left:         `${rect.left}px`,
+            top:          `${rect.top}px`,
+            width:        `${rect.width}px`,
+            opacity:      '0.85',
+            pointerEvents:'none',
+            zIndex:       '9999',
+            transform:    'scale(1.05)',
+            transition:   'none',
+            boxShadow:    '0 8px 32px rgba(0,0,0,0.5)',
         });
         document.body.appendChild(touchClone);
         this.classList.add('dragging');
@@ -481,12 +593,11 @@ function handleTouchMove(e) {
     const touch = e.touches[0];
 
     if (!touchDragActivated) {
-        // Cancel drag intent if the finger moved far enough to be a scroll gesture
         const dx = touch.clientX - touchStartX;
         const dy = touch.clientY - touchStartY;
         if (Math.hypot(dx, dy) > DRAG_CANCEL_PX) {
             clearTimeout(touchDragTimer);
-            touchDragTimer = null;
+            touchDragTimer    = null;
             touchDragSrcIndex = null;
             const pending = previewGrid.querySelector('.touch-drag-pending');
             if (pending) pending.classList.remove('touch-drag-pending');
@@ -498,9 +609,8 @@ function handleTouchMove(e) {
     if (!touchClone) return;
 
     touchClone.style.left = `${touch.clientX - touchOffsetX}px`;
-    touchClone.style.top = `${touch.clientY - touchOffsetY}px`;
+    touchClone.style.top  = `${touch.clientY - touchOffsetY}px`;
 
-    // Hide clone briefly so elementFromPoint can see what's underneath
     touchClone.style.display = 'none';
     const el = document.elementFromPoint(touch.clientX, touch.clientY);
     touchClone.style.display = '';
@@ -527,7 +637,6 @@ function handleTouchEnd(e) {
     }
 
     touchDragActivated = false;
-
     if (touchClone) { touchClone.remove(); touchClone = null; }
 
     const srcEl = previewGrid.querySelector(`[data-index="${touchDragSrcIndex}"]`);
@@ -536,8 +645,8 @@ function handleTouchEnd(e) {
         i.classList.remove('drag-target');
     }
 
-    const touch = e.changedTouches[0];
-    const el = document.elementFromPoint(touch.clientX, touch.clientY);
+    const touch  = e.changedTouches[0];
+    const el     = document.elementFromPoint(touch.clientX, touch.clientY);
     const target = el?.closest('.preview-item');
     if (target) {
         const targetIndex = parseInt(target.dataset.index, 10);
@@ -554,16 +663,18 @@ function handleTouchEnd(e) {
 
 async function generatePDF() {
     if (uploadedImages.length === 0) {
-        alert('Please upload some images first!');
+        await showModal('Please upload some images first.', { confirmLabel: 'OK' });
         return;
     }
 
     const receiptNos = uploadedImages.map(img => img.receiptNo);
     const duplicates = [...new Set(receiptNos.filter((no, i) => receiptNos.indexOf(no) !== i))];
     if (duplicates.length > 0) {
-        if (!confirm(`Duplicate receipt numbers detected: ${duplicates.join(', ')}\n\nContinue anyway?`)) {
-            return;
-        }
+        const ok = await showModal(
+            `Duplicate receipt numbers detected: ${duplicates.join(', ')}\n\nContinue anyway?`,
+            { confirmLabel: 'Continue', cancelLabel: 'Cancel' }
+        );
+        if (!ok) return;
     }
 
     loadingOverlay.style.display = 'flex';
@@ -573,41 +684,40 @@ async function generatePDF() {
         const { jsPDF } = window.jspdf;
         const pdf = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' });
 
-        const pageWidth = 595.28;
+        const pageWidth  = 595.28;
         const pageHeight = 841.89;
-        const margin = 30;
-        const spacing = 20;
-        const gridCols = 2;
-        const gridRows = 2;
-        const cellWidth = (pageWidth - 2 * margin - (gridCols - 1) * spacing) / gridCols;
+        const margin     = 30;
+        const spacing    = 20;
+        const gridCols   = 2;
+        const gridRows   = 2;
+        const cellWidth  = (pageWidth  - 2 * margin - (gridCols - 1) * spacing) / gridCols;
         const cellHeight = (pageHeight - 2 * margin - (gridRows - 1) * spacing) / gridRows;
 
         const pages = packIntoPages(uploadedImages);
 
         for (let pageIndex = 0; pageIndex < pages.length; pageIndex++) {
-            // Update progress and yield to let the browser repaint before heavy jsPDF work
             loadingText.textContent = `Generating page ${pageIndex + 1} of ${pages.length}…`;
-            await new Promise(r => setTimeout(r, 0));
+            await new Promise(r => setTimeout(r, 0)); // yield so the browser repaints
 
             if (pageIndex > 0) pdf.addPage();
             const page = pages[pageIndex];
 
             for (const { img, row, col, colspan, rowspan } of page) {
-                const cellW = cellWidth * colspan + spacing * (colspan - 1);
-                const cellH = cellHeight * rowspan + spacing * (rowspan - 1);
+                const cellW      = cellWidth  * colspan + spacing * (colspan - 1);
+                const cellH      = cellHeight * rowspan + spacing * (rowspan - 1);
                 const captionSpace = 40;
                 const availableH = cellH - captionSpace;
 
                 const scale = Math.min(cellW / img.width, availableH / img.height);
-                const imgW = img.width * scale;
-                const imgH = img.height * scale;
+                const imgW  = img.width  * scale;
+                const imgH  = img.height * scale;
 
-                const x = margin + col * (cellWidth + spacing) + (cellW - imgW) / 2;
+                const x = margin + col * (cellWidth  + spacing) + (cellW - imgW) / 2;
                 const y = margin + row * (cellHeight + spacing) + (availableH - imgH) / 2;
 
                 pdf.addImage(img.dataUrl, img.format, x, y, imgW, imgH);
 
-                const caption = `Receipt No: ${img.receiptNo}`;
+                const caption  = `Receipt No: ${img.receiptNo}`;
                 pdf.setFontSize(16);
                 pdf.setFont('helvetica', 'bold');
                 pdf.setTextColor(0, 0, 0);
@@ -625,8 +735,8 @@ async function generatePDF() {
         loadingText.textContent = 'Saving…';
         await new Promise(r => setTimeout(r, 0));
 
-        const rawName = filenameInput.value.trim();
-        const today = new Date().toISOString().split('T')[0];
+        const rawName  = filenameInput.value.trim();
+        const today    = new Date().toISOString().split('T')[0];
         const baseName = rawName ? sanitizeFilename(rawName) : `receipts_${today}`;
         const filename = `${baseName}.pdf`;
 
